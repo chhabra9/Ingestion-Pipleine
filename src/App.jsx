@@ -38,6 +38,10 @@ function formatBytes(bytes) {
 function App() {
   // State for the selected file
   const [file, setFile] = useState(null)
+  // State for initiated multipart upload info
+  const [uploadInit, setUploadInit] = useState(null)
+  // UI error banner message
+  const [errorMessage, setErrorMessage] = useState('')
   
   // Processing state management
   const [processing, setProcessing] = useState(false)
@@ -107,7 +111,79 @@ function App() {
     elapsedRef.current = 0
     stepStartRef.current = 0
     if (timerRef.current) cancelAnimationFrame(timerRef.current)
+    setErrorMessage('')
   }, [])
+
+  /**
+   * Determine backend base URL
+   */
+  const BASE_URL = useMemo(() => {
+    const envBase = import.meta.env.VITE_BASE_URL || '';
+    return  envBase
+      ? envBase.replace(/\/$/, '')
+      : window.location.origin.replace(/\/$/, '');
+  }, [])
+
+  /**
+   * Compute an S3-safe part count (max 10,000 parts), using a reasonable part size.
+   * Starts with 8MB parts and grows as needed to stay under limit.
+   */
+  const computePartCount = useCallback((sizeBytes) => {
+    const S3_MAX_PARTS = 10000
+    let partSize = 8 * 1024 * 1024 // 8 MB
+    let count = Math.ceil(sizeBytes / partSize)
+    if (count > S3_MAX_PARTS) {
+      partSize = Math.ceil(sizeBytes / S3_MAX_PARTS)
+      count = Math.ceil(sizeBytes / partSize)
+    }
+    return count
+  }, [])
+
+  /**
+   * Initiate multipart upload with backend to retrieve uploadId and presigned URLs
+   */
+  const initiateUpload = useCallback(async (pickedFile) => {
+    try {
+      const contentType = pickedFile.type || 'application/octet-stream'
+      const partCount = computePartCount(pickedFile.size)
+      const body = {
+        fileName: pickedFile.name,
+        contentType,
+        partCount
+      }
+      const primaryUrl = `${BASE_URL}/api/uploads/initiate`
+      console.log('[Upload] Initiating multipart upload:', primaryUrl)
+      let res = await fetch(primaryUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      })
+      if (!res.ok) {
+        if (res.status === 404) {
+          const altUrl = `${BASE_URL}/uploads/initiate`
+          console.warn('[Upload] 404 on primary path, retrying:', altUrl)
+          res = await fetch(altUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+          })
+        }
+        if (!res.ok) {
+          const text = await res.text()
+          throw new Error(`Initiate failed ${res.status}: ${text}`)
+        }
+      }
+      const data = await res.json()
+      setUploadInit(data)
+      console.log('[Upload] Initiated. Received upload data:', data)
+    } catch (err) {
+      console.error('[Upload] Initiation error:', err)
+      setUploadInit(null)
+      // Surface error via banner
+      const message = err?.message || 'Unknown error'
+      setErrorMessage(`Failed to initiate upload: ${message}`)
+    }
+  }, [BASE_URL, computePartCount])
 
   /**
    * Effect to handle step progression animation
@@ -155,9 +231,12 @@ function App() {
    * @param {File} picked - The selected file
    */
   const handleFile = useCallback((picked) => {
+    console.log(`[Upload] Selected file: ${picked.name}, size: ${picked.size} bytes (${formatBytes(picked.size)})`)
     setFile(picked)
     reset()
-  }, [reset])
+    // Fire-and-forget initiation of multipart upload
+    initiateUpload(picked)
+  }, [reset, initiateUpload])
 
   /**
    * Determine the status of a step by its index
@@ -175,6 +254,20 @@ function App() {
     <div className="page">
       <div className="card">
         <div className="card-title">Ingest Video</div>
+
+        {/* Error alert banner */}
+        {errorMessage && (
+          <div className="alert error" role="alert">
+            <span>{errorMessage}</span>
+            <button 
+              className="alert-close" 
+              aria-label="Dismiss alert"
+              onClick={() => setErrorMessage('')}
+            >
+              ×
+            </button>
+          </div>
+        )}
 
         {/* File upload component */}
         <UploadBox file={file} onFileSelected={handleFile} />
