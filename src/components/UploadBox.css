@@ -1,0 +1,12 @@
+.upload-dropzone {
+  border: 2px dashed #334155;
+  border-radius: 14px;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.4);
+  transition: border-color .2s ease, background .2s ease;
+}
+.upload-dropzone.dragging { border-color: var(--primary); background: rgba(79,70,229,0.08); }
+.upload-inner { display: flex; align-items: center; gap: 12px; justify-content: space-between; flex-wrap: wrap; }
+.upload-title { color: var(--muted); font-size: 14px; }
+
+
