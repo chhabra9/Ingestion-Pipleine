@@ -151,7 +151,7 @@ function App() {
         contentType,
         partCount
       }
-      const primaryUrl = `${BASE_URL}/api/uploads/initiate`
+      const primaryUrl = `${BASE_URL}/uploads/initiate`
       console.log('[Upload] Initiating multipart upload:', primaryUrl)
       let res = await fetch(primaryUrl, {
         method: 'POST',
